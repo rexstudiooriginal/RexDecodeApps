@@ -3,7 +3,7 @@ name: Decode All APKs in Root
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
 
 jobs:
   decode-apks:
@@ -22,12 +22,23 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Install APKTool & JADX
+    - name: Install APKTool & JADX (Fix)
       run: |
         sudo apt-get update
         sudo apt-get install -y apktool
-        wget -O jadx.zip https://github.com/skylot/jadx/releases/latest/download/jadx-bin.zip
-        unzip jadx.zip -d jadx
+        
+        # Install JADX - pakai versi stable yang pasti ada
+        JADX_VERSION="1.5.0"
+        wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-bin.zip"
+        if [ $? -ne 0 ]; then
+          echo "⚠️  Version $JADX_VERSION not found, trying latest stable..."
+          # Fallback: coba versi lain
+          for v in 1.4.7 1.4.6 1.4.5; do
+            wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${v}/jadx-bin.zip" && break
+          done
+        fi
+        
+        unzip -o jadx.zip -d jadx
         sudo mv jadx/bin/jadx /usr/local/bin/
         chmod +x /usr/local/bin/jadx
 
@@ -36,7 +47,7 @@ jobs:
         mkdir -p output/
         APK_FILES=(*.apk)
         if [ ${#APK_FILES[@]} -eq 0 ] || [ ! -f "${APK_FILES[0]}" ]; then
-          echo "❌ Tidak ada file .apk di root repository!"
+          echo "❌ No .apk files found in root!"
           exit 1
         fi
         
@@ -45,21 +56,16 @@ jobs:
           echo "📦 Processing: $apk"
           echo "========================================="
           
-          # Buat folder per APK
           BASE_NAME="${apk%.apk}"
           mkdir -p "output/$BASE_NAME"
           
-          # Apktool (resource + smali)
           echo "🔧 Running apktool on $apk..."
           apktool d "$apk" -o "output/$BASE_NAME/apktool" 2>/dev/null || echo "⚠️  apktool warning (ignored)"
           
-          # Jadx (Java decompile)
           echo "☕ Running jadx on $apk..."
           jadx "$apk" -d "output/$BASE_NAME/jadx" 2>/dev/null || echo "⚠️  jadx warning (ignored)"
           
-          # Copy original APK ke output (referensi)
           cp "$apk" "output/$BASE_NAME/"
-          
           echo "✅ Done: $apk"
           echo ""
         done
