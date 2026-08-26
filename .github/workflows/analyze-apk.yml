@@ -22,25 +22,12 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Install APKTool & JADX (Fix)
+    - name: Install APKTool & JADX (APT)
       run: |
         sudo apt-get update
-        sudo apt-get install -y apktool
-        
-        # Install JADX - pakai versi stable yang pasti ada
-        JADX_VERSION="1.5.0"
-        wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-bin.zip"
-        if [ $? -ne 0 ]; then
-          echo "⚠️  Version $JADX_VERSION not found, trying latest stable..."
-          # Fallback: coba versi lain
-          for v in 1.4.7 1.4.6 1.4.5; do
-            wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${v}/jadx-bin.zip" && break
-          done
-        fi
-        
-        unzip -o jadx.zip -d jadx
-        sudo mv jadx/bin/jadx /usr/local/bin/
-        chmod +x /usr/local/bin/jadx
+        sudo apt-get install -y apktool jadx
+        echo "✅ apktool version: $(apktool --version)"
+        echo "✅ jadx version: $(jadx --version 2>/dev/null || echo 'installed')"
 
     - name: Decode all APK files in root
       run: |
@@ -60,10 +47,10 @@ jobs:
           mkdir -p "output/$BASE_NAME"
           
           echo "🔧 Running apktool on $apk..."
-          apktool d "$apk" -o "output/$BASE_NAME/apktool" 2>/dev/null || echo "⚠️  apktool warning (ignored)"
+          apktool d "$apk" -o "output/$BASE_NAME/apktool" 2>/dev/null || echo "⚠️  apktool warning"
           
           echo "☕ Running jadx on $apk..."
-          jadx "$apk" -d "output/$BASE_NAME/jadx" 2>/dev/null || echo "⚠️  jadx warning (ignored)"
+          jadx "$apk" -d "output/$BASE_NAME/jadx" 2>/dev/null || echo "⚠️  jadx warning"
           
           cp "$apk" "output/$BASE_NAME/"
           echo "✅ Done: $apk"
@@ -89,8 +76,6 @@ jobs:
         
         echo "" >> summary.md
         echo "📁 **Total APK decoded: $(ls -1 *.apk 2>/dev/null | wc -l)**" >> summary.md
-        echo "" >> summary.md
-        echo "📥 Download artifacts to get full decompiled source." >> summary.md
 
     - name: Upload all results
       uses: actions/upload-artifact@v4
