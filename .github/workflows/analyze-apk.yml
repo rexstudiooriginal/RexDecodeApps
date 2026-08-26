@@ -22,12 +22,39 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Install APKTool & JADX (APT)
+    - name: Install APKTool & JADX
       run: |
         sudo apt-get update
-        sudo apt-get install -y apktool jadx
-        echo "✅ apktool version: $(apktool --version)"
-        echo "✅ jadx version: $(jadx --version 2>/dev/null || echo 'installed')"
+        sudo apt-get install -y apktool
+        
+        # Download JADX dari GitHub (pakai versi 1.4.7 yang pasti ada)
+        JADX_VERSION="1.4.7"
+        wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-bin.zip"
+        if [ $? -ne 0 ]; then
+          echo "⚠️  Version $JADX_VERSION not found, trying 1.4.6..."
+          JADX_VERSION="1.4.6"
+          wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-bin.zip"
+        fi
+        if [ $? -ne 0 ]; then
+          echo "⚠️  Version $JADX_VERSION not found, trying 1.4.5..."
+          JADX_VERSION="1.4.5"
+          wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-bin.zip"
+        fi
+        if [ $? -ne 0 ]; then
+          echo "❌ All JADX versions failed. Installing from APT fallback..."
+          sudo apt-get install -y jadx || echo "⚠️  jadx not available in APT either"
+        fi
+        
+        # Ekstrak dan install jika file zip ada
+        if [ -f jadx.zip ]; then
+          unzip -o jadx.zip -d jadx
+          sudo mv jadx/bin/jadx /usr/local/bin/
+          chmod +x /usr/local/bin/jadx
+          echo "✅ JADX installed successfully"
+        fi
+        
+        echo "✅ apktool version: $(apktool --version 2>/dev/null || echo 'unknown')"
+        echo "✅ jadx version: $(jadx --version 2>/dev/null || echo 'not installed')"
 
     - name: Decode all APK files in root
       run: |
@@ -47,10 +74,15 @@ jobs:
           mkdir -p "output/$BASE_NAME"
           
           echo "🔧 Running apktool on $apk..."
-          apktool d "$apk" -o "output/$BASE_NAME/apktool" 2>/dev/null || echo "⚠️  apktool warning"
+          apktool d "$apk" -o "output/$BASE_NAME/apktool" 2>/dev/null || echo "⚠️  apktool warning (ignored)"
           
           echo "☕ Running jadx on $apk..."
-          jadx "$apk" -d "output/$BASE_NAME/jadx" 2>/dev/null || echo "⚠️  jadx warning"
+          if command -v jadx &> /dev/null; then
+            jadx "$apk" -d "output/$BASE_NAME/jadx" 2>/dev/null || echo "⚠️  jadx warning (ignored)"
+          else
+            echo "⚠️  jadx not available, skipping Java decompile"
+            echo "Java decompilation skipped" > "output/$BASE_NAME/jadx_status.txt"
+          fi
           
           cp "$apk" "output/$BASE_NAME/"
           echo "✅ Done: $apk"
@@ -70,7 +102,7 @@ jobs:
           APKTOOL_OK="✅"
           JADX_OK="✅"
           [ ! -d "output/$BASE_NAME/apktool" ] && APKTOOL_OK="❌"
-          [ ! -d "output/$BASE_NAME/jadx" ] && JADX_OK="❌"
+          [ ! -d "output/$BASE_NAME/jadx" ] && JADX_OK="⚠️ (jadx missing)"
           echo "| \`$apk\` | $APKTOOL_OK | $JADX_OK | $SIZE |" >> summary.md
         done
         
