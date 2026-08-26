@@ -1,79 +1,99 @@
-name: APK Security Analysis
+name: Decode All APKs in Root
 
-# Kapan workflow ini dijalankan?
 on:
   push:
-    branches: [ "main" ]        # Saat ada push ke branch main
-  workflow_dispatch:            # Atau dijalankan manual dari tab Actions
-    inputs:
-      apk_url:
-        description: 'URL APK (opsional, jika tidak ada di repo)'
-        required: false
+    branches: [ "main" ]
+  workflow_dispatch:  # Manual trigger
 
 jobs:
-  analyze-apk:
-    runs-on: ubuntu-latest      # Menggunakan server Linux dari GitHub
+  decode-apks:
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: write            # Diperlukan untuk mengupload artifact hasil
+      actions: write
 
     steps:
-    # 1. Ambil kode repositori
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 2. Setup Java (wajib untuk jadx & apktool)
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
-        cache: 'gradle'         # Untuk akselerasi jika ada project Gradle
 
-    # 3. Install alat yang diperlukan
     - name: Install APKTool & JADX
       run: |
-        # Install APKTool
         sudo apt-get update
         sudo apt-get install -y apktool
-        
-        # Install JADX (dekompilasi ke Java)
         wget -O jadx.zip https://github.com/skylot/jadx/releases/latest/download/jadx-bin.zip
         unzip jadx.zip -d jadx
         sudo mv jadx/bin/jadx /usr/local/bin/
         chmod +x /usr/local/bin/jadx
 
-    # 4. (Opsional) Download APK dari URL jika diperlukan
-    - name: Download APK from URL
-      if: ${{ github.event.inputs.apk_url != '' }}
-      run: |
-        wget -O app.apk ${{ github.event.inputs.apk_url }}
-
-    # 5. Dekompilasi APK
-    - name: Decompile APK
+    - name: Decode all APK files in root
       run: |
         mkdir -p output/
-        # Ekstrak resource & Smali (untuk AndroidManifest.xml)
-        apktool d app.apk -o output/apktool/
-        # Dekompilasi DEX ke Java (lebih mudah dibaca)
-        jadx app.apk -d output/jadx/
-        # Jika file APK tidak ada di root, sesuaikan path-nya
+        APK_FILES=(*.apk)
+        if [ ${#APK_FILES[@]} -eq 0 ] || [ ! -f "${APK_FILES[0]}" ]; then
+          echo "❌ Tidak ada file .apk di root repository!"
+          exit 1
+        fi
+        
+        for apk in *.apk; do
+          echo "========================================="
+          echo "📦 Processing: $apk"
+          echo "========================================="
+          
+          # Buat folder per APK
+          BASE_NAME="${apk%.apk}"
+          mkdir -p "output/$BASE_NAME"
+          
+          # Apktool (resource + smali)
+          echo "🔧 Running apktool on $apk..."
+          apktool d "$apk" -o "output/$BASE_NAME/apktool" 2>/dev/null || echo "⚠️  apktool warning (ignored)"
+          
+          # Jadx (Java decompile)
+          echo "☕ Running jadx on $apk..."
+          jadx "$apk" -d "output/$BASE_NAME/jadx" 2>/dev/null || echo "⚠️  jadx warning (ignored)"
+          
+          # Copy original APK ke output (referensi)
+          cp "$apk" "output/$BASE_NAME/"
+          
+          echo "✅ Done: $apk"
+          echo ""
+        done
 
-    # 6. Cari kata kunci mencurigakan (seperti "bug", "exploit", "crash")
-    - name: Search for suspicious keywords
+    - name: Generate summary report
       run: |
-        echo "=== Scanning for potential exploit patterns ==="
-        grep -rni "bug" output/jadx/ || echo "No 'bug' found"
-        grep -rni "exploit" output/jadx/ || echo "No 'exploit' found"
-        grep -rni "crash" output/jadx/ || echo "No 'crash' found"
-        grep -rni "exec" output/jadx/ || echo "No 'exec' found"
-        grep -rni "Runtime.getRuntime" output/jadx/ || echo "No Runtime execution found"
-        grep -rni "api_key\|secret\|password" output/jadx/ || echo "No hardcoded secrets found"
-        # Anda bisa menambahkan lebih banyak keyword sesuai kebutuhan
+        echo "## 📊 APK Decode Report" > summary.md
+        echo "" >> summary.md
+        echo "| APK File | apktool | jadx | Size |" >> summary.md
+        echo "|----------|---------|------|------|" >> summary.md
+        
+        for apk in *.apk; do
+          BASE_NAME="${apk%.apk}"
+          SIZE=$(du -h "$apk" | cut -f1)
+          APKTOOL_OK="✅"
+          JADX_OK="✅"
+          [ ! -d "output/$BASE_NAME/apktool" ] && APKTOOL_OK="❌"
+          [ ! -d "output/$BASE_NAME/jadx" ] && JADX_OK="❌"
+          echo "| \`$apk\` | $APKTOOL_OK | $JADX_OK | $SIZE |" >> summary.md
+        done
+        
+        echo "" >> summary.md
+        echo "📁 **Total APK decoded: $(ls -1 *.apk 2>/dev/null | wc -l)**" >> summary.md
+        echo "" >> summary.md
+        echo "📥 Download artifacts to get full decompiled source." >> summary.md
 
-    # 7. Upload hasil analisis sebagai artifact (bisa di-download)
-    - name: Upload analysis results
+    - name: Upload all results
       uses: actions/upload-artifact@v4
       with:
-        name: decompiled-apk-analysis
+        name: all-decompiled-apks
         path: output/
+
+    - name: Upload summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: report
+        path: summary.md
