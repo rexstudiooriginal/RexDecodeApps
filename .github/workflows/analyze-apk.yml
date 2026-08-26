@@ -22,39 +22,25 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Install APKTool & JADX
+    - name: Install APKTool & JADX from Maven Central
       run: |
         sudo apt-get update
         sudo apt-get install -y apktool
         
-        # Download JADX dari GitHub (pakai versi 1.4.7 yang pasti ada)
+        # Download JADX core JAR from Maven Central (stable)
         JADX_VERSION="1.4.7"
-        wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-bin.zip"
-        if [ $? -ne 0 ]; then
-          echo "⚠️  Version $JADX_VERSION not found, trying 1.4.6..."
-          JADX_VERSION="1.4.6"
-          wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-bin.zip"
-        fi
-        if [ $? -ne 0 ]; then
-          echo "⚠️  Version $JADX_VERSION not found, trying 1.4.5..."
-          JADX_VERSION="1.4.5"
-          wget -O jadx.zip "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-bin.zip"
-        fi
-        if [ $? -ne 0 ]; then
-          echo "❌ All JADX versions failed. Installing from APT fallback..."
-          sudo apt-get install -y jadx || echo "⚠️  jadx not available in APT either"
-        fi
+        wget -O jadx-core.jar "https://repo1.maven.org/maven2/io/github/skylot/jadx-core/${JADX_VERSION}/jadx-core-${JADX_VERSION}.jar"
         
-        # Ekstrak dan install jika file zip ada
-        if [ -f jadx.zip ]; then
-          unzip -o jadx.zip -d jadx
-          sudo mv jadx/bin/jadx /usr/local/bin/
-          chmod +x /usr/local/bin/jadx
-          echo "✅ JADX installed successfully"
-        fi
+        # Buat wrapper script untuk jadx
+        echo '#!/bin/bash' > /usr/local/bin/jadx
+        echo "java -cp /usr/local/bin/jadx-core.jar jadx.cli.JadxCLI \"\$@\"" >> /usr/local/bin/jadx
+        chmod +x /usr/local/bin/jadx
+        
+        # Copy jar ke lokasi yang diharapkan
+        sudo cp jadx-core.jar /usr/local/bin/
         
         echo "✅ apktool version: $(apktool --version 2>/dev/null || echo 'unknown')"
-        echo "✅ jadx version: $(jadx --version 2>/dev/null || echo 'not installed')"
+        echo "✅ jadx installed from Maven Central"
 
     - name: Decode all APK files in root
       run: |
@@ -77,12 +63,7 @@ jobs:
           apktool d "$apk" -o "output/$BASE_NAME/apktool" 2>/dev/null || echo "⚠️  apktool warning (ignored)"
           
           echo "☕ Running jadx on $apk..."
-          if command -v jadx &> /dev/null; then
-            jadx "$apk" -d "output/$BASE_NAME/jadx" 2>/dev/null || echo "⚠️  jadx warning (ignored)"
-          else
-            echo "⚠️  jadx not available, skipping Java decompile"
-            echo "Java decompilation skipped" > "output/$BASE_NAME/jadx_status.txt"
-          fi
+          jadx "$apk" -d "output/$BASE_NAME/jadx" 2>/dev/null || echo "⚠️  jadx warning (ignored)"
           
           cp "$apk" "output/$BASE_NAME/"
           echo "✅ Done: $apk"
@@ -102,7 +83,7 @@ jobs:
           APKTOOL_OK="✅"
           JADX_OK="✅"
           [ ! -d "output/$BASE_NAME/apktool" ] && APKTOOL_OK="❌"
-          [ ! -d "output/$BASE_NAME/jadx" ] && JADX_OK="⚠️ (jadx missing)"
+          [ ! -d "output/$BASE_NAME/jadx" ] && JADX_OK="❌"
           echo "| \`$apk\` | $APKTOOL_OK | $JADX_OK | $SIZE |" >> summary.md
         done
         
