@@ -1,0 +1,79 @@
+name: APK Security Analysis
+
+# Kapan workflow ini dijalankan?
+on:
+  push:
+    branches: [ "main" ]        # Saat ada push ke branch main
+  workflow_dispatch:            # Atau dijalankan manual dari tab Actions
+    inputs:
+      apk_url:
+        description: 'URL APK (opsional, jika tidak ada di repo)'
+        required: false
+
+jobs:
+  analyze-apk:
+    runs-on: ubuntu-latest      # Menggunakan server Linux dari GitHub
+    permissions:
+      contents: read
+      actions: write            # Diperlukan untuk mengupload artifact hasil
+
+    steps:
+    # 1. Ambil kode repositori
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 2. Setup Java (wajib untuk jadx & apktool)
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        cache: 'gradle'         # Untuk akselerasi jika ada project Gradle
+
+    # 3. Install alat yang diperlukan
+    - name: Install APKTool & JADX
+      run: |
+        # Install APKTool
+        sudo apt-get update
+        sudo apt-get install -y apktool
+        
+        # Install JADX (dekompilasi ke Java)
+        wget -O jadx.zip https://github.com/skylot/jadx/releases/latest/download/jadx-bin.zip
+        unzip jadx.zip -d jadx
+        sudo mv jadx/bin/jadx /usr/local/bin/
+        chmod +x /usr/local/bin/jadx
+
+    # 4. (Opsional) Download APK dari URL jika diperlukan
+    - name: Download APK from URL
+      if: ${{ github.event.inputs.apk_url != '' }}
+      run: |
+        wget -O app.apk ${{ github.event.inputs.apk_url }}
+
+    # 5. Dekompilasi APK
+    - name: Decompile APK
+      run: |
+        mkdir -p output/
+        # Ekstrak resource & Smali (untuk AndroidManifest.xml)
+        apktool d app.apk -o output/apktool/
+        # Dekompilasi DEX ke Java (lebih mudah dibaca)
+        jadx app.apk -d output/jadx/
+        # Jika file APK tidak ada di root, sesuaikan path-nya
+
+    # 6. Cari kata kunci mencurigakan (seperti "bug", "exploit", "crash")
+    - name: Search for suspicious keywords
+      run: |
+        echo "=== Scanning for potential exploit patterns ==="
+        grep -rni "bug" output/jadx/ || echo "No 'bug' found"
+        grep -rni "exploit" output/jadx/ || echo "No 'exploit' found"
+        grep -rni "crash" output/jadx/ || echo "No 'crash' found"
+        grep -rni "exec" output/jadx/ || echo "No 'exec' found"
+        grep -rni "Runtime.getRuntime" output/jadx/ || echo "No Runtime execution found"
+        grep -rni "api_key\|secret\|password" output/jadx/ || echo "No hardcoded secrets found"
+        # Anda bisa menambahkan lebih banyak keyword sesuai kebutuhan
+
+    # 7. Upload hasil analisis sebagai artifact (bisa di-download)
+    - name: Upload analysis results
+      uses: actions/upload-artifact@v4
+      with:
+        name: decompiled-apk-analysis
+        path: output/
